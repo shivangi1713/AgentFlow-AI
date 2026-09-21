@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workflow {
+  id              String            @id @default(cuid())
+  userId          String
+  name            String
+  description     String?
+  nodes           Json
+  edges           Json
+  status          WorkflowStatus    @default(DRAFT)
+  webhookSecret   String            @default(cuid())
+  activeVersionId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  versions        WorkflowVersion[]
+  runs            ExecutionRun[]
+
+  @@index([userId])
+  @@index([webhookSecret])
+  @@index([activeVersionId])
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+}
+
+model WorkflowVersion {
+  id         String         @id @default(cuid())
+  workflowId String
+  workflow   Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version    Int
+  nodes      Json
+  edges      Json
+  createdAt  DateTime       @default(now())
+  runs       ExecutionRun[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId, createdAt])
+}
+
+model ExecutionRun {
+  id                String             @id @default(cuid())
+  workflowId        String
+  workflow          Workflow           @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersionId String
+  workflowVersion   WorkflowVersion    @relation(fields: [workflowVersionId], references: [id], onDelete: Restrict)
+  userId            String
+  traceId           String?
+  status            ExecutionRunStatus @default(QUEUED)
+  idempotencyKey    String?            @unique
+  triggerPayload    Json
+  startedAt         DateTime?
+  endedAt           DateTime?
+  durationMs        Int?
+  errorMessage      String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  steps             ExecutionStep[]
+  events            ExecutionEvent[]
+
+  @@index([workflowId, createdAt(sort: Desc)])
+  @@index([workflowVersionId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([traceId])
+}
+
+model ExecutionStep {
+  id           String              @id @default(cuid())
+  runId        String
+  run          ExecutionRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  traceId      String?
+  nodeId       String
+  nodeType     String
+  status       ExecutionStepStatus @default(PENDING)
+  attemptCount Int                 @default(0)
+  inputData    Json?
+  outputData   Json?
+  errorMessage String?
+  durationMs   Int?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@unique([runId, nodeId])
+  @@index([runId, status])
+  @@index([traceId])
+}
+
+model ExecutionEvent {
+  id        String       @id @default(cuid())
+  runId     String
+  run       ExecutionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  traceId   String?
+  stepId    String?
+  type      String
+  payload   Json?
+  createdAt DateTime     @default(now())
+
+  @@index([runId, createdAt])
+  @@index([stepId, createdAt])
+  @@index([traceId, createdAt])
+}
+
+enum ExecutionRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  TIMED_OUT
+}
+
+enum ExecutionStepStatus {
+  PENDING
+  READY
+  RUNNING
+  RETRYING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
